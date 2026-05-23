@@ -52,7 +52,8 @@ Then navigate to `http://localhost:8000/docs` to interact with the API endpoints
 - `tests/`: Contains the automated unit and integration tests.
 
 ## Output
-<img width="1919" height="949" alt="image" src="https://github.com/user-attachments/assets/a304ebe2-b03d-4567-883c-26512042ad81" />
+<img width="1919" height="944" alt="image" src="https://github.com/user-attachments/assets/9bff338d-54cf-4a8e-b72e-8c43dd7b8567" />
+
 
 ## Logs
 <img width="1824" height="902" alt="image" src="https://github.com/user-attachments/assets/0ef50995-cc97-4ef9-b729-6634d87f1001" />

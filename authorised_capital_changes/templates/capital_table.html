@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Capital Table & Discrepancies</title>
+    <style>
+        body { font-family: serif; margin: 2rem; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 2rem; border: 1px solid black; }
+        th, td { border: 1px solid black; padding: 0.5rem; text-align: left; vertical-align: top; }
+        th { background-color: #e0e0e0; text-align: center; vertical-align: middle; font-weight: bold; }
+        .footnote-ref { color: red; font-weight: bold; font-size: 0.8rem; vertical-align: super; }
+    </style>
+</head>
+<body>
+    <h1>Capital Table</h1>
+    <table>
+        <thead>
+            <tr>
+                <th rowspan="2">Date of Shareholder's<br>Meeting</th>
+                <th colspan="2">Particulars of Change</th>
+                <th rowspan="2">AGM/EGM</th>
+            </tr>
+            <tr>
+                <th>From</th>
+                <th>To</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row, d_date in html_rows %}
+            <tr>
+                <td>
+                    {{ d_date }}
+                    {% if row.meeting_date.flag_code %}
+                        <span class="footnote-ref">[{{ flag_map[row.meeting_date.flag_code] }}]</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {{ row.authorised_from.value or "-" }}
+                    {% if row.authorised_from.flag_code %}
+                        <span class="footnote-ref">[{{ flag_map[row.authorised_from.flag_code] }}]</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {{ row.authorised_to.value or "-" }}
+                    {% if row.authorised_to.flag_code %}
+                        <span class="footnote-ref">[{{ flag_map[row.authorised_to.flag_code] }}]</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {{ row.meeting_type.value or "-" }}
+                    {% if row.meeting_type.flag_code %}
+                        <span class="footnote-ref">[{{ flag_map[row.meeting_type.flag_code] }}]</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>Discrepancy Report — Footnotes</h2>
+    <ul>
+        {% for flag in flags %}
+        <li>
+            <strong>[{{ flag_map[flag.flag_code] }}] {{ flag.flag_code }}</strong> (Row {{ flag.row_number }}, {{ flag.field_name }}):
+            {{ flag.flag_message }}
+        </li>
+        {% endfor %}
+    </ul>
+</body>
+</html>

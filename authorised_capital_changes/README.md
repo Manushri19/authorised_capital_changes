@@ -44,6 +44,9 @@ Then navigate to `http://localhost:8000/docs` to interact with the API endpoints
 
 - `authorised_capital_changes/pipeline/`: Contains the LangGraph nodes and edges.
 - `authorised_capital_changes/schemas/`: Contains the strict Pydantic V2 schemas used for validation and data handling.
+- `authorised_capital_changes/api/`: FastAPI application and routes to interact with the pipeline via a REST interface.
+- `authorised_capital_changes/services/`: Auxiliary services such as LLM clients, document parsing, and template engines.
+- `authorised_capital_changes/templates/`: Jinja2 HTML templates used to render the final visual outputs.
 - `authorised_capital_changes/data/raw/`: Drop your raw markdown documents here before running the CLI script.
 - `data/outputs/`: The pipeline stores the final generated Capital Table (JSON/HTML) and discrepancy reports here.
 - `tests/`: Contains the automated unit and integration tests.

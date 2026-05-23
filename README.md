@@ -1,6 +1,6 @@
-# Authorised Capital Changes
+# Authorised Capital Changes Pipeline
 
-Authorised Capital Changes is an automated, AI-native data pipeline that extracts, corroborates, and validates corporate capital increases from filings like SH-7s, Board Resolutions, and EGMs/AGMs.
+Authorised Capital Changes Pipeline is an automated, AI-native data pipeline that extracts, corroborates, and validates corporate capital increases from filings like SH-7s, Board Resolutions, and EGMs/AGMs.
 
 ## Prerequisites
 

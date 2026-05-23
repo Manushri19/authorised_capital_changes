@@ -7,5 +7,5 @@ venv/
 env/
 .pytest_cache/
 tests/fixtures/*.html
-data/outputs/
+
 .DS_Store

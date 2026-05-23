@@ -1,0 +1,229 @@
+[
+  {
+    "row_number": 0,
+    "meeting_date": {
+      "value": "On incorporation",
+      "confirmed": true,
+      "source_document": "SH7_Event1_2018.md",
+      "source_field_machine": "Field 4(a)(i) \u2014 Existing",
+      "source_field_human": "Existing authorised capital before first event, used as incorporation capital",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "authorised_from": {
+      "value": null,
+      "confirmed": true,
+      "source_document": "SH7_Event1_2018.md",
+      "source_field_machine": null,
+      "source_field_human": null,
+      "flag_code": null,
+      "flag_message": null
+    },
+    "authorised_to": {
+      "value": "\u20b91,50,000 divided into 15,000 Equity Shares of \u20b910 each",
+      "confirmed": true,
+      "source_document": "SH7_Event1_2018.md",
+      "source_field_machine": "Field 4(a)(i) \u2014 Existing + Section 9(a) nominal value",
+      "source_field_human": "Share count derived arithmetically: existing capital \u00f7 nominal value per share from Section 9(a) of SH7_Event1_2018.md",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "meeting_type": {
+      "value": null,
+      "confirmed": true,
+      "source_document": null,
+      "source_field_machine": null,
+      "source_field_human": null,
+      "flag_code": null,
+      "flag_message": null
+    },
+    "source_srn": null,
+    "source_sh7_filename": "SH7_Event1_2018.md",
+    "source_filing_date": null,
+    "has_flags": false,
+    "flag_count": 0,
+    "flags": []
+  },
+  {
+    "row_number": 1,
+    "meeting_date": {
+      "value": "2018-03-22",
+      "confirmed": true,
+      "source_document": "SH7_Event1_2018.md",
+      "source_field_machine": "Field 4",
+      "source_field_human": "Date of members' meeting, Field 4",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "authorised_from": {
+      "value": "\u20b91,50,000 divided into 15,000 Equity Shares of \u20b910 each",
+      "confirmed": true,
+      "source_document": "SH7_Event1_2018.md",
+      "source_field_machine": "Field 4(a)(i) \u2014 Existing",
+      "source_field_human": "Existing authorised capital before this event",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "authorised_to": {
+      "value": "\u20b93,00,000 divided into 30,000 Equity Shares of \u20b910 each",
+      "confirmed": true,
+      "source_document": "SH7_Event1_2018.md",
+      "source_field_machine": "Section 9(a)",
+      "source_field_human": "Authorised capital after change, Section 9(a)",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "meeting_type": {
+      "value": "EGM",
+      "confirmed": true,
+      "source_document": "EGM_Event1_2018.md",
+      "source_field_machine": "EGM/AGM Resolution operative clause",
+      "source_field_human": "Meeting type confirmed from EGM/AGM resolution document",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "source_srn": "SH7_Event1_2018.md",
+    "source_sh7_filename": "SH7_Event1_2018.md",
+    "source_filing_date": "2018-03-22",
+    "has_flags": false,
+    "flag_count": 0,
+    "flags": []
+  },
+  {
+    "row_number": 2,
+    "meeting_date": {
+      "value": "2019-05-15",
+      "confirmed": true,
+      "source_document": "SH7_Event2_2019.md",
+      "source_field_machine": "Field 4",
+      "source_field_human": "Date of members' meeting, Field 4",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "authorised_from": {
+      "value": "\u20b93,00,000 divided into 30,000 Equity Shares of \u20b910 each",
+      "confirmed": true,
+      "source_document": "SH7_Event2_2019.md",
+      "source_field_machine": "Field 4(a)(i) \u2014 Existing",
+      "source_field_human": "Existing authorised capital before this event",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "authorised_to": {
+      "value": "\u20b950,00,000 divided into 5,00,000 Equity Shares of \u20b910 each",
+      "confirmed": true,
+      "source_document": "SH7_Event2_2019.md",
+      "source_field_machine": "Section 9(a)",
+      "source_field_human": "Authorised capital after change, Section 9(a)",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "meeting_type": {
+      "value": "EGM",
+      "confirmed": true,
+      "source_document": "EGM_Event2_2019.md",
+      "source_field_machine": "EGM/AGM Resolution operative clause",
+      "source_field_human": "Meeting type confirmed from EGM/AGM resolution document",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "source_srn": "SH7_Event2_2019.md",
+    "source_sh7_filename": "SH7_Event2_2019.md",
+    "source_filing_date": "2019-05-15",
+    "has_flags": false,
+    "flag_count": 0,
+    "flags": []
+  },
+  {
+    "row_number": 3,
+    "meeting_date": {
+      "value": "2021-08-25",
+      "confirmed": true,
+      "source_document": "SH7_Event3_2021.md",
+      "source_field_machine": "Field 4",
+      "source_field_human": "Date of members' meeting, Field 4",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "authorised_from": {
+      "value": "\u20b950,00,000 divided into 5,00,000 Equity Shares of \u20b910 each",
+      "confirmed": true,
+      "source_document": "SH7_Event3_2021.md",
+      "source_field_machine": "Field 4(a)(i) \u2014 Existing",
+      "source_field_human": "Existing authorised capital before this event",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "authorised_to": {
+      "value": "\u20b92,00,00,000 divided into 18,00,000 Equity Shares of \u20b910 each and 2,00,000 Preference Shares of \u20b910 each",
+      "confirmed": true,
+      "source_document": "SH7_Event3_2021.md",
+      "source_field_machine": "Section 9(a)",
+      "source_field_human": "Authorised capital after change, Section 9(a)",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "meeting_type": {
+      "value": "EGM",
+      "confirmed": true,
+      "source_document": "EGM_Event3_2021.md",
+      "source_field_machine": "EGM/AGM Resolution operative clause",
+      "source_field_human": "Meeting type confirmed from EGM/AGM resolution document",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "source_srn": "SH7_Event3_2021.md",
+    "source_sh7_filename": "SH7_Event3_2021.md",
+    "source_filing_date": "2021-09-10",
+    "has_flags": false,
+    "flag_count": 0,
+    "flags": []
+  },
+  {
+    "row_number": 4,
+    "meeting_date": {
+      "value": "2024-03-28",
+      "confirmed": true,
+      "source_document": "SH7_Event4_2024.md",
+      "source_field_machine": "Field 4",
+      "source_field_human": "Date of members' meeting, Field 4",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "authorised_from": {
+      "value": "\u20b92,00,00,000 divided into 18,00,000 Equity Shares of \u20b910 each and 2,00,000 Preference Shares of \u20b910 each",
+      "confirmed": true,
+      "source_document": "SH7_Event4_2024.md",
+      "source_field_machine": "Field 4(a)(i) \u2014 Existing",
+      "source_field_human": "Existing authorised capital before this event",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "authorised_to": {
+      "value": "\u20b910,00,00,000 divided into 99,00,000 Equity Shares of \u20b910 each and 1,00,000 Preference Shares of \u20b910 each",
+      "confirmed": true,
+      "source_document": "SH7_Event4_2024.md",
+      "source_field_machine": "Section 9(a)",
+      "source_field_human": "Authorised capital after change, Section 9(a)",
+      "flag_code": null,
+      "flag_message": null
+    },
+    "meeting_type": {
+      "value": null,
+      "confirmed": false,
+      "source_document": null,
+      "source_field_machine": null,
+      "source_field_human": null,
+      "flag_code": "FLAG_MEETING_TYPE_UNCONFIRMED",
+      "flag_message": "AGM/EGM could not be confirmed \u2014 no EGM/AGM resolution document available and no EGM/AGM token found in attached filenames"
+    },
+    "source_srn": "SH7_Event4_2024.md",
+    "source_sh7_filename": "SH7_Event4_2024.md",
+    "source_filing_date": "2024-03-28",
+    "has_flags": true,
+    "flag_count": 1,
+    "flags": [
+      "FLAG_MEETING_TYPE_UNCONFIRMED"
+    ]
+  }
+]

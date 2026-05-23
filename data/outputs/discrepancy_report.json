@@ -1,0 +1,31 @@
+{
+  "run_id": "test_run_001",
+  "generated_at": "2026-05-23T15:38:48.965708Z",
+  "total_documents_processed": 20,
+  "sh7_documents_found": 4,
+  "sh7_documents_extracted": 4,
+  "sh7_documents_assembled": 4,
+  "sh7_documents_blocked": 0,
+  "flags": [
+    {
+      "flag_code": "FLAG_MEETING_TYPE_UNCONFIRMED",
+      "row_number": 4,
+      "field_name": "meeting_type",
+      "flag_message": "AGM/EGM could not be confirmed \u2014 no EGM/AGM resolution document available and no EGM/AGM token found in attached filenames",
+      "source_document": "unknown",
+      "conflicting_document": null
+    }
+  ],
+  "arithmetic_failures": [],
+  "continuity_failures": [],
+  "cross_document_conflicts": [],
+  "duplicate_sh7s": [],
+  "unmatched_attachments": {
+    "SH7_Event4_2024.md": [
+      "AGM_Event4_2024.md",
+      "Notice_of_AGM_2024.md"
+    ]
+  },
+  "blocked_sh7s": [],
+  "corroborations": []
+}

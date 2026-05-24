@@ -2,14 +2,18 @@ import os
 import logging
 from authorised_capital_changes.pipeline.edges.routing import build_pipeline_graph
 from authorised_capital_changes.schemas.pipeline_state import PipelineState
+from authorised_capital_changes.logging_config import configure_logging
 
-logging.basicConfig(level=logging.INFO)
+configure_logging()
 
 def main():
     input_folder = os.path.join(os.getcwd(), "authorised_capital_changes", "data", "raw")
     
+    run_id = "test_run_001"
+    configure_logging(run_id=run_id)   # injects run_id into every log record
+
     state: PipelineState = {
-        "run_id": "test_run_001",
+        "run_id": run_id,
         "input_folder": input_folder,
         "raw_files": [],
         "classified_docs": [],

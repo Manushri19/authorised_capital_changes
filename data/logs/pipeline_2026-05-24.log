@@ -1,0 +1,21 @@
+2026-05-24 07:36:43 | INFO     | root | Logging initialised | file=C:\Users\manus\Project\data\logs\pipeline_2026-05-24.log | level=INFO
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.ingestion | Ingestion started | folder=C:\Users\manus\Project\authorised_capital_changes\data\raw
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.ingestion | Ingestion complete | files_read=20 errors=0
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.classifier | Classifier started | file_count=20
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.classifier | Classifier complete | classified=20 sh7=4 non_sh7=16 unclassified=0
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.relationship_resolver | Relationship Resolver started | sh7_count=4 non_sh7_count=16
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.relationship_resolver | SH-7 SH7_Event1_2018.md | attachment_refs_found=4: ['EGM_Event1_2018.md', 'MOA_Event1_2018.md', 'Notice_of_EGM_2018.md', 'BoardMeeting_Event1_2018.md']
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.relationship_resolver | Matched attachment 'Notice_of_EGM_2018.md' → Notice_of_EGM_2018.md (type=DocumentType.EGM_NOTICE) for SH-7 SH7_Event1_2018.md: type not used in DocumentGroup; skipping.
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.relationship_resolver | DocumentGroup built | sh7=SH7_Event1_2018.md event_index=1 board=BoardMeeting_Event1_2018.md egm=EGM_Event1_2018.md moa=MOA_Event1_2018.md unmatched=0
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.relationship_resolver | SH-7 SH7_Event2_2019.md | attachment_refs_found=4: ['EGM_Event2_2019.md', 'MOA_Event2_2019.md', 'Notice_of_EGM_2019.md', 'BoardMeeting_Event2_2019.md']
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.relationship_resolver | Matched attachment 'Notice_of_EGM_2019.md' → Notice_of_EGM_2019.md (type=DocumentType.EGM_NOTICE) for SH-7 SH7_Event2_2019.md: type not used in DocumentGroup; skipping.
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.relationship_resolver | DocumentGroup built | sh7=SH7_Event2_2019.md event_index=2 board=BoardMeeting_Event2_2019.md egm=EGM_Event2_2019.md moa=MOA_Event2_2019.md unmatched=0
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.relationship_resolver | SH-7 SH7_Event3_2021.md | attachment_refs_found=4: ['EGM_Event3_2021.md', 'MOA_Event3_2021.md', 'Notice_of_EGM_2021.md', 'BoardMeeting_Event3_2021.md']
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.relationship_resolver | Matched attachment 'Notice_of_EGM_2021.md' → Notice_of_EGM_2021.md (type=DocumentType.EGM_NOTICE) for SH-7 SH7_Event3_2021.md: type not used in DocumentGroup; skipping.
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.relationship_resolver | DocumentGroup built | sh7=SH7_Event3_2021.md event_index=3 board=BoardMeeting_Event3_2021.md egm=EGM_Event3_2021.md moa=MOA_Event3_2021.md unmatched=0
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.relationship_resolver | SH-7 SH7_Event4_2024.md | attachment_refs_found=4: ['AGM_Event4_2024.md', 'MOA_Event4_2024.md', 'Notice_of_AGM_2024.md', 'BoardMeeting_Event4_2024.md']
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.relationship_resolver | Unmatched attachment ref in SH7_Event4_2024.md: 'AGM_Event4_2024.md'
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.relationship_resolver | Unmatched attachment ref in SH7_Event4_2024.md: 'Notice_of_AGM_2024.md'
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.relationship_resolver | DocumentGroup built | sh7=SH7_Event4_2024.md event_index=4 board=BoardMeeting_Event4_2024.md egm=None moa=MOA_Event4_2024.md unmatched=2
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.relationship_resolver | Relationship Resolver complete | groups=4 unmatched_sh7s=1
+2026-05-24 07:36:43 | INFO     | authorised_capital_changes.pipeline.nodes.attachment_extractor | Attachment Extractor started | group_count=4

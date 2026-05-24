@@ -49,6 +49,7 @@ Then navigate to `http://localhost:8000/docs` to interact with the API endpoints
 - `authorised_capital_changes/templates/`: Jinja2 HTML templates used to render the final visual outputs.
 - `authorised_capital_changes/data/raw/`: Drop your raw markdown documents here before running the CLI script.
 - `data/outputs/`: The pipeline stores the final generated Capital Table (JSON/HTML) and discrepancy reports here.
+- `data/logs/`: The pipeline stores all the logs shown in terminal in yyyy-mm-dd hh-mm-ss format here.
 - `tests/`: Contains the automated unit and integration tests.
 
 ## Output

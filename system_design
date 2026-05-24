@@ -1,0 +1,259 @@
+# System Design: Authorised Capital Changes Pipeline
+
+## What It Does (One Line)
+
+An automated, **LangGraph-orchestrated document intelligence pipeline** that ingests a folder of raw Indian MCA corporate filings (Markdown), classifies them, extracts structured data, validates it with strict arithmetic and cross-document rules, and outputs a **traceable capital history table** (JSON + HTML).
+
+---
+
+## Why It Exists
+
+Indian companies filing authorised capital changes (Form SH-7) must submit a bundle of supporting documents — Board Meeting Resolution, EGM/AGM Resolution, MOA Clause V amendment — alongside the SH-7 form. Manually reconciling these across multiple events (e.g. 2018 → 2019 → 2021 → 2024) is error-prone and time-consuming.
+
+**This system automates that reconciliation** with zero human-in-the-loop, flagging discrepancies rather than guessing.
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    FastAPI (api/)                           │
+│  POST /api/v1/pipeline/run  →  background_task             │
+│  GET  /api/v1/pipeline/status/{run_id}                     │
+└────────────────────────┬────────────────────────────────────┘
+                         │ invokes
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│             LangGraph DAG (pipeline/edges/routing.py)       │
+│                                                             │
+│  [1] ingestion ──► [2] classifier                          │
+│                          │                                  │
+│               (conditional: any SH-7s found?)               │
+│                          │                                  │
+│                    [3] relationship_resolver                 │
+│                          │                                  │
+│                    [4] attachment_extractor                  │
+│                          │                                  │
+│                    [5] sh7_extractor                         │
+│                          │                                  │
+│            (conditional: any extractions succeeded?)         │
+│                          │                                  │
+│                    [6] validator                             │
+│                          │                                  │
+│           (conditional: any SH-7s passed validation?)        │
+│                          │                                  │
+│                    [7] assembler                             │
+│                          │                                  │
+│                    [8] narrative_generator ──► END          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Layer-by-Layer Breakdown
+
+### 1. API Layer (`api/`)
+
+| File | Role |
+|---|---|
+| `main.py` | FastAPI app factory, mounts the router |
+| `store.py` | In-memory `dict` keyed by `run_id` — acts as a job store |
+| `routes/pipeline.py` | Two endpoints: `POST /run` (fire-and-forget via `BackgroundTasks`) and `GET /status/{run_id}` |
+
+**Why `BackgroundTasks`?** The pipeline can take 30–120 seconds per run (LLM calls). A background task returns immediately so the client polls `/status`.
+
+**Why in-memory store?** This is a local intelligence tool, not a multi-instance service. Persistence is through the output files written to `data/outputs/`.
+
+---
+
+### 2. Pipeline Orchestration (`pipeline/edges/routing.py`)
+
+Uses **LangGraph `StateGraph`** — a directed graph where each node is a pure function `(state) → state`.
+
+**Why LangGraph?**
+- The pipeline is a **DAG with conditional exits** — LangGraph's conditional edges make early termination clean (e.g., if no SH-7 is found, the graph exits immediately without running downstream nodes).
+- State is a single `TypedDict` (`PipelineState`) passed immutably through nodes, making debugging and replay straightforward.
+- Human-in-the-loop was explicitly **removed** in favour of automated flagging — LangGraph's routing edges encode this determinism.
+
+**Three conditional gates:**
+1. **After classifier** — exit if zero SH-7s found
+2. **After sh7_extractor** — exit if zero extractions succeeded
+3. **After validator** — exit if all SH-7s were blocked
+
+---
+
+### 3. Shared State (`schemas/pipeline_state.py`)
+
+`PipelineState` is a `TypedDict` with ~17 fields that accumulate results as the graph executes:
+
+```
+run_id, input_folder
+  → raw_files (ingestion)
+    → classified_docs / sh7_documents / non_sh7_documents (classifier)
+      → document_groups / unmatched_attachment_refs (resolver)
+        → attachment_bundles (attachment_extractor)
+          → extracted_sh7s / sh7_extraction_errors (sh7_extractor)
+            → validation_reports / sh7s_passed_validation (validator)
+              → capital_table_rows (assembler)
+                → final_table_rows / discrepancy_report (narrative_generator)
+```
+
+Each node appends its stage name to `completed_stages` and appends structured errors to `pipeline_errors` (never raises, unless unrecoverable).
+
+---
+
+### 4. Pipeline Nodes (`pipeline/nodes/`)
+
+#### Node 1 — Ingestion (`ingestion.py`)
+- Reads all `.md` files from `input_folder`, builds `FileMetadata` objects.
+- **No LLM.** Errors per-file are logged and skipped — the pipeline never halts on a single bad read.
+- **Why Markdown?** Corpus documents are stored as `.md` for uniform parsing; real-world PDFs would be pre-converted.
+
+#### Node 2 — Classifier (`classifier.py`)
+Two-pass classification:
+- **Pass 1 — Rule-based** (filename keywords → confidence 0.92; content keywords → confidence 0.87). Handles SH7, PAS3, MOA, BoardMeeting, EGM_Notice, EGM_Resolution.
+- **Pass 2 — LLM fallback** (Ollama/Qwen via OpenAI-compatible API) triggered only when rule confidence < 0.85.
+- Documents with confidence < 0.60 go to `unclassified_documents`.
+- **Why hybrid?** LLMs are expensive and slow — rule-based handles the 95% clean case; LLM handles edge cases. This keeps the classifier fast and cost-efficient.
+- Deduplicates SH-7s that share the same `event_date_hint`.
+
+#### Node 3 — Relationship Resolver (`relationship_resolver.py`)
+- Groups documents into `DocumentGroup` objects: each SH-7 is matched with its Board Resolution, EGM Resolution, and MOA using filename patterns and date hinting.
+- **Why?** SH-7 forms reference attachments by name. The resolver builds the document cluster so the attachment extractor can work on the right set.
+
+#### Node 4 — Attachment Extractor (`attachment_extractor.py`)
+- For each `DocumentGroup`, extracts structured data from Board Resolution, EGM Resolution, and MOA using LLM + function-calling.
+- Outputs `AttachmentExtractionBundle` per SH-7.
+- Data is typed via `BoardResolutionExtraction`, `EGMResolutionExtraction`, `MOAExtraction` (Pydantic models in `schemas/attachment.py`).
+
+#### Node 5 — SH-7 Extractor (`sh7_extractor.py`)
+- The most critical extraction node. Extracts the full `SH7Extraction` from each SH-7 document via LLM function-calling.
+- Key fields: CIN, meeting_date, existing/revised capital, Section 9(a) post-change breakdown, SRN, stamp duty, attachment filenames.
+- A **Pydantic `model_validator`** cross-checks Section 9(a) total vs Field 4(a)(i) revised capital at parse time — catches extraction inconsistencies immediately.
+
+#### Node 6 — Validator (`validator.py`)
+The most complex node. Runs **4 deterministic checks** in order:
+
+| Check | Type | Logic |
+|---|---|---|
+| **Arithmetic** | Non-blocking | `existing + difference_addition == revised` |
+| **Continuity** | **Blocking** | Event N's `existing` must equal Event N-1's `revised` |
+| **Cross-document** | Non/Blocking | SH-7 date & capital must agree with Board/EGM resolutions. Disagrees with ONE → non-blocking flag. Disagrees with ALL → blocking. |
+| **Duplicate** | **Blocking** | Two SH-7s with same `meeting_date` → both blocked |
+
+Flags are issued sequentially: `FLAG_001`, `FLAG_002` ... shared across all events and check types.
+
+#### Node 7 — Assembler (`assembler.py`)
+- Builds `CapitalTableRow` objects from validated SH-7s (blocked ones are excluded).
+- Row 0 is synthetic: "On Incorporation" — derived from Event 1's existing capital.
+- Each field is a `FieldValue(value, confirmed, source_document, source_field_machine, source_field_human, flag_code, flag_message)` — providing full traceability.
+- Meeting type is resolved from EGM resolution body text, then from attached filenames; flagged if neither is available.
+
+#### Node 8 — Narrative Generator (`narrative_generator.py`)
+- Formats dates for HTML display.
+- Assembles the `DiscrepancyReport` from all validation reports.
+- **Writes three output files** to `data/outputs/`:
+  - `capital_table.json` — machine-readable capital history
+  - `discrepancy_report.json` — all flags, arithmetic/continuity/cross-doc failures
+  - `capital_table.html` — rendered from `templates/capital_table.html` Jinja2 template
+
+---
+
+### 5. Schemas (`schemas/`)
+
+All schemas use **Pydantic V2** for strict validation:
+
+| Schema | Purpose |
+|---|---|
+| `document.py` | `FileMetadata`, `ClassifiedDocument`, `DocumentGroup`, `DocumentType` enum |
+| `sh7.py` | `SH7Extraction`, `ShareBreakdown`, `AuthorisedCapitalBlock` — plus cross-field validator |
+| `attachment.py` | `BoardResolutionExtraction`, `EGMResolutionExtraction`, `MOAExtraction` |
+| `validation.py` | `ArithmeticCheckResult`, `ContinuityCheckResult`, `CrossDocumentCheckResult`, `ValidationReport` |
+| `capital_event.py` | `CapitalTableRow`, `FieldValue` — the output data model |
+| `output.py` | `DiscrepancyReport`, `FlagEntry` — the final report model |
+| `pipeline_state.py` | `PipelineState` TypedDict — the graph's shared state |
+
+**Why Pydantic for everything?** Type safety at every stage, automatic serialisation to JSON for outputs, and built-in validation errors that carry field-level context.
+
+---
+
+### 6. Services (`services/`)
+
+| Service | Role |
+|---|---|
+| `llm_client.py` | Wraps Ollama (via OpenAI SDK at `localhost:11434/v1`). Converts Google GenAI `Tool` definitions to OpenAI tool format. Forces function-calling for structured JSON output. Model: `qwen3-coder-next:cloud` (env-configurable). |
+| `document_parser.py` | `read_md_file()` — reads and returns markdown text. `format_inr()` — formats numbers as Indian currency strings. |
+| `template_engine.py` | `render_capital_table()` — Jinja2 rendering of `capital_table.html` template. |
+
+**Why Ollama instead of Gemini API?** Local inference = no network latency, no API costs, fully deterministic for offline/compliance environments. The classifier has a Gemini model reference as an env variable, which allows switiching to closed source models provided by Google anytime.
+
+---
+
+### 7. Logging (`authorised_capital_changes/logging_config.py`)
+
+All pipeline logs are captured simultaneously to the terminal **and** a rotating log file via a single shared `configure_logging()` function.
+
+**Entry points:**
+
+| Entry point | How logging is initialised |
+|---|---|
+| `run_pipeline.py` | `configure_logging()` called at module level before `main()` |
+| `api/main.py` | `configure_logging()` called inside the FastAPI `lifespan` async context manager (runs once at uvicorn startup) |
+
+**Handler stack (both attached to the root logger):**
+
+| Handler | Destination | Format |
+|---|---|---|
+| `StreamHandler` | Terminal (stdout) | `YYYY-MM-DD HH:MM:SS \| LEVEL \| logger.name \| message` |
+| `TimedRotatingFileHandler` | `data/logs/pipeline_<YYYY-MM-DD>.log` | Same format |
+
+**Rotation policy:** Rotates at midnight (`when="midnight"`), retains **30 daily files**, UTF-8 encoded.
+
+**Why root logger?** Every node already uses `logging.getLogger(__name__)` — child loggers propagate to the root automatically, so zero changes were needed inside any node or service.
+
+**Sample log output (from a real run):**
+```
+2026-05-24 07:36:43 | INFO     | root | Logging initialised | file=...pipeline_2026-05-24.log | level=INFO
+2026-05-24 07:36:43 | INFO     | ...nodes.ingestion | Ingestion complete | files_read=20 errors=0
+2026-05-24 07:36:43 | INFO     | ...nodes.classifier | Classifier complete | classified=20 sh7=4 non_sh7=16 unclassified=0
+2026-05-24 07:36:43 | INFO     | ...nodes.relationship_resolver | DocumentGroup built | sh7=SH7_Event1_2018.md event_index=1 board=BoardMeeting_Event1_2018.md egm=EGM_Event1_2018.md moa=MOA_Event1_2018.md unmatched=0
+```
+
+**Log file location:**
+```
+Project/
+└── data/
+    └── logs/
+        ├── pipeline_2026-05-24.log   ← current day
+        ├── pipeline_2026-05-23.log   ← yesterday (auto-rotated)
+        └── ...                       ← up to 30 days retained
+```
+
+---
+
+### 8. Data (`data/raw/`)
+
+20 Markdown files representing 4 corporate capital events (2018, 2019, 2021, 2024):
+
+```
+SH7_Event{N}_{YEAR}.md         — Form SH-7
+BoardMeeting_Event{N}_{YEAR}.md — Board resolution
+EGM_Event{N}_{YEAR}.md         — EGM resolution
+Notice_of_EGM_{YEAR}.md        — EGM notice (classified but not extracted)
+MOA_Event{N}_{YEAR}.md         — Memorandum of Association Clause V
+```
+
+---
+
+## Key Design Decisions
+
+| Decision | Rationale |
+|---|---|
+| **Linear DAG, no parallelism** | Deterministic, reproducible, easy to debug. Each stage's output is the next stage's input. |
+| **Rule-based classifier first** | Keeps LLM calls to a minimum; rule-based covers well-named MCA filings reliably. |
+| **Blocking vs non-blocking flags** | Arithmetic mismatch → non-blocking (data is still used with flag). Continuity break → blocking (downstream output would be wrong). Cross-doc: majority disagrees → blocking, minority disagrees → non-blocking. |
+| **`FieldValue` traceability** | Every output value carries `source_document`, `source_field_machine`, `source_field_human` — so any number in the final table can be traced back to the exact field in the exact file. |
+| **`completed_stages` list** | Enables the API status endpoint to report granular progress without database dependency. |
+| **No human-in-the-loop** | Explicitly removed. Unresolvable ambiguities are flagged in the report, not paused for review — the system is fully automated. |
+| **Centralised logging to file** | `configure_logging()` attaches a `TimedRotatingFileHandler` to the root logger at startup. All node-level `getLogger(__name__)` calls propagate automatically — no per-node changes needed. 30-day retention, daily rotation. |

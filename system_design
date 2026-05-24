@@ -1,22 +1,15 @@
-# Architecture Doc: Authorised Capital Changes Pipeline
-
-## What I Built (The TL;DR)
-
+Architecture Doc: Authorised Capital Changes Pipeline
+What I Built (The TL;DR)
 At its core, this is an automated document intelligence pipeline powered by LangGraph. It chews through a folder of raw Indian MCA corporate filings (mostly Markdown), figures out what each file is, rips out the structured data, runs strict math and cross-reference checks, and finally spits out a clean, traceable capital history table in both JSON and HTML.
 
----
-
-## Why I Needed This
-
+Why I Needed This
 If you've ever dealt with Indian corporate filings, you know the pain. When a company updates its authorised capital (Form SH-7), they can't just submit the form—they have to drop a whole bundle of supporting documents, like Board Resolutions, EGM/AGM Resolutions, and MOA Clause V amendments.
 
 Trying to manually reconcile all this paperwork across multiple historical events (say, tracking a company from 2018 to 2019, then 2021, and 2024) is a massive headache and super prone to human error. I built this system to completely automate that reconciliation. There is zero human-in-the-loop here. If something doesn't line up, the pipeline flags the discrepancy instead of taking wild guesses.
 
----
 
-## How It Fits Together
-
-```text
+How It Fits Together
+Plaintext
 ┌─────────────────────────────────────────────────────────────┐
 │                    FastAPI (api/)                           │
 │  POST /api/v1/pipeline/run  →  background_task              │
@@ -48,143 +41,124 @@ Trying to manually reconcile all this paperwork across multiple historical event
 │                    [8] narrative_generator ──► DONE         │
 └─────────────────────────────────────────────────────────────┘
 
-```
 
----
+Layer-by-Layer Breakdown
+1. The API Layer (api/)
+main.py:  It's the standard FastAPI app factory where I mounted the router.
 
-## Layer-by-Layer Breakdown
+store.py: Simple in-memory dict keyed by run_id. Job store that is lightweight.
 
-### 1. The API Layer (`api/`)
+routes/pipeline.py: Holds my two main endpoints. POST /run triggers the job, and GET /status/{run_id} lets you check on it.
 
-* **`main.py`**: The standard FastAPI app factory where I mount the router.
-* **`store.py`**: Just a simple in-memory dictionary keyed by `run_id`. It acts as a lightweight job store.
-* **`routes/pipeline.py`**: Houses my two main endpoints. `POST /run` triggers the job, and `GET /status/{run_id}` lets you check on it.
-
-**Why use `BackgroundTasks`?**
+Why use BackgroundTasks?
 The LLM calls mean a full pipeline run can easily take 30 to 120 seconds. I return an immediate response so the frontend isn't hanging, and the client can just poll the status endpoint.
 
-**Why an in-memory store?**
-This is meant to be a localized intelligence tool, not a massive distributed web service. I handle persistence simply by writing the final output files straight to `data/outputs/`.
+Why an in-memory store?
+This is meant to be a localized intelligence tool, not a massive distributed web service. I handle persistence simply by writing the final output files straight to data/outputs/.
 
----
+2. Orchestration (pipeline/edges/routing.py)
+I handle the flow using LangGraph's StateGraph. It’s essentially a directed graph where every node is just a pure function that takes in the state, modifies it, and passes it along.
 
-### 2. Orchestration (`pipeline/edges/routing.py`)
+Why LangGraph?
 
-I handle the flow using LangGraph's `StateGraph`. It’s essentially a directed graph where every node is just a pure function that takes in the state, modifies it, and passes it along.
+My pipeline is basically a DAG with specific early-exit points. LangGraph’s conditional edges make it really easy to bail out cleanly. For example, if the classifier doesn't find any SH-7 forms, the graph just stops right there instead of running empty downstream nodes and crashing.
 
-**Why LangGraph?**
+State is managed via a single TypedDict (PipelineState) that gets passed around immutably, which makes debugging and replaying failed runs way less painful.
 
-* My pipeline is basically a DAG with specific early-exit points. LangGraph’s conditional edges make it really easy to bail out cleanly. For example, if the classifier doesn't find any SH-7 forms, the graph just stops right there instead of running empty downstream nodes and crashing.
-* State is managed via a single `TypedDict` (`PipelineState`) that gets passed around immutably, which makes debugging and replaying failed runs way less painful.
-* I explicitly ripped out the human-in-the-loop components to force deterministic, automated flagging. LangGraph's routing makes that determinism easy to map out.
+I explicitly ripped out the human-in-the-loop components to force deterministic, automated flagging. LangGraph's routing makes that determinism easy to map out.
 
----
+3. Shared State (schemas/pipeline_state.py)
+The PipelineState object carries about 17 fields that slowly build up as the graph executes. The flow looks like this:
 
-### 3. Shared State (`schemas/pipeline_state.py`)
+run_id & input_folder
+→ raw_files
+→ classified_docs (split into SH-7s and non-SH-7s)
+→ document_groups
+→ attachment_bundles
+→ extracted_sh7s
+→ validation_reports
+→ capital_table_rows
+→ final_table_rows & discrepancy_report
 
-The `PipelineState` object carries about 17 fields that slowly build up as the graph executes. The flow looks like this:
+Every time a node finishes, it tacks its name onto completed_stages and dumps any structured errors into pipeline_errors. I try to never raise actual Python exceptions unless a failure is totally unrecoverable.
 
-`run_id` & `input_folder`
-→ `raw_files`
-→ `classified_docs` (split into SH-7s and non-SH-7s)
-→ `document_groups`
-→ `attachment_bundles`
-→ `extracted_sh7s`
-→ `validation_reports`
-→ `capital_table_rows`
-→ `final_table_rows` & `discrepancy_report`
+4. The Pipeline Nodes (pipeline/nodes/)
+Step 1: Ingestion (ingestion.py)
+Grabs all the .md files from the target folder and spins up FileMetadata objects. There's zero LLM usage here. If a file fails to read, I log the error and just skip it—one bad file shouldn't tank the whole run.
 
-Every time a node finishes, it tacks its name onto `completed_stages` and dumps any structured errors into `pipeline_errors`. I try to never raise actual Python exceptions unless a failure is totally unrecoverable.
-
----
-
-### 4. The Pipeline Nodes (`pipeline/nodes/`)
-
-**Step 1: Ingestion (`ingestion.py`)**
-Grabs all the `.md` files from the target folder and spins up `FileMetadata` objects. There's zero LLM usage here. If a file fails to read, I log the error and just skip it—one bad file shouldn't tank the whole run.
-
-**Step 2: Classifier (`classifier.py`)**
+Step 2: Classifier (classifier.py)
 I use a two-pass classification system to save time and money.
 
-* **Pass 1 (Rule-based):** Checks filename and content keywords. Very fast, and covers well-named filings with high confidence (0.87 to 0.92).
-* **Pass 2 (LLM Fallback):** I fire up Ollama/Qwen via an OpenAI-compatible API only if the rule confidence dips below 0.85.
+Pass 1 (Rule-based): Checks filename and content keywords. Very fast, and covers well-named filings with high confidence (0.87 to 0.92).
 
-Anything scoring under 0.60 gets dumped into `unclassified_documents`. I also run a quick deduplication pass on SH-7s here if they share an `event_date_hint`.
+Pass 2 (LLM Fallback): I fire up Ollama/Qwen via an OpenAI-compatible API only if the rule confidence dips below 0.85.
 
-**Step 3: Relationship Resolver (`relationship_resolver.py`)**
-This node bundles the documents into `DocumentGroup` objects. It links every SH-7 to its matching Board Resolution, EGM Resolution, and MOA using filename patterns and date clues. I need this because SH-7s reference their attachments by name, so the next node needs to know exactly which files belong to which form.
+Anything scoring under 0.60 gets dumped into unclassified_documents. I also run a quick deduplication pass on SH-7s here if they share an event_date_hint.
 
-**Step 4: Attachment Extractor (`attachment_extractor.py`)**
-Takes each document group and extracts the exact structured data I need from the resolutions and MOA using LLM function calling. The output is an `AttachmentExtractionBundle` for each SH-7, strictly typed via Pydantic.
+Step 3: Relationship Resolver (relationship_resolver.py)
+This node bundles the documents into DocumentGroup objects. It links every SH-7 to its matching Board Resolution, EGM Resolution, and MOA using filename patterns and date clues. I need this because SH-7s reference their attachments by name, so the next node needs to know exactly which files belong to which form.
 
-**Step 5: SH-7 Extractor (`sh7_extractor.py`)**
-The heavy hitter of the pipeline. It pulls the full `SH7Extraction` from each form—grabbing the CIN, meeting date, old/new capital, Section 9(a) breakdown, SRN, and stamp duty. I wired up a Pydantic `model_validator` to cross-check the Section 9(a) math against Field 4(a)(i) in real-time. This catches parsing hallucinations instantly.
+Step 4: Attachment Extractor (attachment_extractor.py)
+Takes each document group and extracts the exact structured data I need from the resolutions and MOA using LLM function calling. The output is an AttachmentExtractionBundle for each SH-7, strictly typed via Pydantic.
 
-**Step 6: Validator (`validator.py`)**
+Step 5: SH-7 Extractor (sh7_extractor.py)
+The heavy hitter of the pipeline. It pulls the full SH7Extraction from each form—grabbing the CIN, meeting date, old/new capital, Section 9(a) breakdown, SRN, and stamp duty. I wired up a Pydantic model_validator to cross-check the Section 9(a) math against Field 4(a)(i) in real-time. This catches parsing hallucinations instantly.
+
+Step 6: Validator (validator.py)
 This is where the complex logic lives. It runs four hard-coded checks:
 
-1. **Arithmetic:** Just making sure existing + added actually equals revised. It won't block the run, just flags it.
-2. **Continuity:** Strict block. If Event 2's starting capital doesn't match Event 1's final capital, I halt that branch.
-3. **Cross-doc:** Checks if the SH-7 dates and numbers match the attached resolutions. One mismatch is a warning; all of them mismatching is a hard block.
-4. **Duplicate:** If I see two SH-7s for the exact same meeting date, I block both to be safe.
+Arithmetic: Just making sure existing + added actually equals revised. It won't block the run, just flags it.
 
-**Step 7: Assembler (`assembler.py`)**
-Constructs `CapitalTableRow` objects out of whatever SH-7s survived validation. Row 0 is just a fake "On Incorporation" row derived from the first event's starting capital. Every piece of data is stored as a `FieldValue` holding the value, the source document, and exactly where it came from, making the final table 100% traceable.
+Continuity: Strict block. If Event 2's starting capital doesn't match Event 1's final capital, I halt that branch.
 
-**Step 8: Narrative Generator (`narrative_generator.py`)**
-Pretties up the dates for the frontend, compiles the final `DiscrepancyReport`, and writes three files to `data/outputs/`: the JSON capital table, the JSON discrepancy report, and a Jinja2-rendered HTML table.
+Cross-doc: Checks if the SH-7 dates and numbers match the attached resolutions. One mismatch is a warning; all of them mismatching is a hard block.
 
----
+Duplicate: If I see two SH-7s for the exact same meeting date, I block both to be safe.
 
-### 5. Schemas (`schemas/`)
+Step 7: Assembler (assembler.py)
+Constructs CapitalTableRow objects out of whatever SH-7s survived validation. Row 0 is just a fake "On Incorporation" row derived from the first event's starting capital. Every piece of data is stored as a FieldValue holding the value, the source document, and exactly where it came from, making the final table 100% traceable.
 
-I went all-in on **Pydantic V2** for this. Type safety is non-negotiable for financial data.
+Step 8: Narrative Generator (narrative_generator.py)
+Pretties up the dates for the frontend, compiles the final DiscrepancyReport, and writes three files to data/outputs/: the JSON capital table, the JSON discrepancy report, and a Jinja2-rendered HTML table.
 
-* `document.py`: Handles metadata and groupings.
-* `sh7.py` / `attachment.py`: The extraction targets.
-* `validation.py`: Holds the check results.
-* `capital_event.py` / `output.py`: The final data models.
+5. Schemas (schemas/)
+I went all-in on Pydantic V2 for this. Type safety is non-negotiable for financial data.
+
+document.py: Manages metadata and grouping.
+
+sh7.py / attachment.py: The extraction targets.
+
+validation.py: Holds the check results.
+
+capital_event.py / output.py: The final data models.
 
 Using Pydantic gives me free JSON serialization, and the built-in validation errors actually tell you exactly which field blew up.
 
----
+6. Services (services/)
+llm_client.py: Wraps Ollama. It grabs Google GenAI tool definitions and mangles them into OpenAI's format to force structured JSON output out of the local model (qwen3-coder-next:cloud).
 
-### 6. Services (`services/`)
+document_parser.py: Handles markdown reading and Indian currency formatting.
 
-* **`llm_client.py`**: Wraps Ollama. It grabs Google GenAI tool definitions and mangles them into OpenAI's format to force structured JSON output out of the local model (`qwen3-coder-next:cloud`).
-* **`document_parser.py`**: Handles markdown reading and Indian currency formatting.
-* **`template_engine.py`**: Runs the Jinja renders.
+template_engine.py: Runs the Jinja renders.
 
-**Why Ollama instead of a cloud API?** Local inference means zero network lag, zero API bills, and it works perfectly for offline compliance environments. If I ever need to swap to Gemini or OpenAI, the classifier has an environment variable ready to go.
+Why Ollama instead of a cloud API? Local inference means zero network lag, zero API bills, and it works perfectly for offline compliance environments. If I ever need to swap to Gemini or OpenAI, the classifier has an environment variable ready to go.
 
----
+7. Centralized Logging (logging_config.py)
+Everything goes to the terminal and a rotating log file simultaneously through a single configure_logging() setup.
 
-### 7. Centralized Logging (`logging_config.py`)
-
-Everything goes to the terminal and a rotating log file simultaneously through a single `configure_logging()` setup.
-
-I initialize this at the module level in the CLI script, and inside the FastAPI lifespan context manager for the API. It attaches a `StreamHandler` (for stdout) and a `TimedRotatingFileHandler` to the root logger. Because every node just calls `logging.getLogger(__name__)`, the child loggers propagate up automatically. I didn't have to touch the logging code inside the individual nodes at all.
-
-**What the logs look like:**
-
-```text
+What the logs look like:
 2026-05-24 07:36:43 | INFO  | root | Logging initialised | file=...pipeline_2026-05-24.log
 2026-05-24 07:36:43 | INFO  | ...nodes.ingestion | Ingestion complete | files_read=20 errors=0
 2026-05-24 07:36:43 | INFO  | ...nodes.relationship_resolver | DocumentGroup built | sh7=SH7_Event1.md event_index=1
 
-```
+I initialize this at the module level in the CLI script, and inside the FastAPI lifespan context manager for the API. It attaches a StreamHandler (for stdout) and a TimedRotatingFileHandler to the root logger. Because every node just calls logging.getLogger(__name__), the child loggers propagate up automatically. I didn't have to touch the logging code inside the individual nodes at all.
 
----
 
-### 8. The Raw Data (`data/raw/`)
+Why I Designed It This Way
+Linear DAG, zero parallelism: I wanted it highly deterministic and easy to debug. Each stage's output is just the next stage's input.
 
-The system expects Markdown files representing corporate capital events. I use a standard naming convention like `SH7_Event{N}_{YEAR}.md`, `BoardMeeting_Event{N}_{YEAR}.md`, and `MOA_Event{N}_{YEAR}.md`.
+Rule-based classifier first: Keeps expensive LLM calls to an absolute minimum.
 
----
+FieldValue traceability: Any number you see on the final frontend table can be traced back to the exact field in the exact raw file.
 
-## Why I Designed It This Way
-
-* **Linear DAG, zero parallelism:** I wanted it highly deterministic and easy to debug. Each stage's output is just the next stage's input.
-* **Rule-based classifier first:** Keeps expensive LLM calls to an absolute minimum.
-* **`FieldValue` traceability:** Any number you see on the final frontend table can be traced back to the exact field in the exact raw file.
-* **No human intervention:** Unresolvable ambiguities are explicitly flagged in the final report, not paused for manual review. It runs completely hands-off.
+No human intervention: Unresolvable ambiguities are explicitly flagged in the final report, not paused for manual review. It runs completely hands-off.

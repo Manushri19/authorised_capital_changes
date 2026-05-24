@@ -1,259 +1,190 @@
-# System Design: Authorised Capital Changes Pipeline
+# Architecture Doc: Authorised Capital Changes Pipeline
 
-## What It Does (One Line)
+## What I Built (The TL;DR)
 
-An automated, **LangGraph-orchestrated document intelligence pipeline** that ingests a folder of raw Indian MCA corporate filings (Markdown), classifies them, extracts structured data, validates it with strict arithmetic and cross-document rules, and outputs a **traceable capital history table** (JSON + HTML).
-
----
-
-## Why It Exists
-
-Indian companies filing authorised capital changes (Form SH-7) must submit a bundle of supporting documents — Board Meeting Resolution, EGM/AGM Resolution, MOA Clause V amendment — alongside the SH-7 form. Manually reconciling these across multiple events (e.g. 2018 → 2019 → 2021 → 2024) is error-prone and time-consuming.
-
-**This system automates that reconciliation** with zero human-in-the-loop, flagging discrepancies rather than guessing.
+At its core, this is an automated document intelligence pipeline powered by LangGraph. It chews through a folder of raw Indian MCA corporate filings (mostly Markdown), figures out what each file is, rips out the structured data, runs strict math and cross-reference checks, and finally spits out a clean, traceable capital history table in both JSON and HTML.
 
 ---
 
-## Architecture Overview
+## Why I Needed This
 
-```
+If you've ever dealt with Indian corporate filings, you know the pain. When a company updates its authorised capital (Form SH-7), they can't just submit the form—they have to drop a whole bundle of supporting documents, like Board Resolutions, EGM/AGM Resolutions, and MOA Clause V amendments.
+
+Trying to manually reconcile all this paperwork across multiple historical events (say, tracking a company from 2018 to 2019, then 2021, and 2024) is a massive headache and super prone to human error. I built this system to completely automate that reconciliation. There is zero human-in-the-loop here. If something doesn't line up, the pipeline flags the discrepancy instead of taking wild guesses.
+
+---
+
+## How It Fits Together
+
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                    FastAPI (api/)                           │
-│  POST /api/v1/pipeline/run  →  background_task             │
-│  GET  /api/v1/pipeline/status/{run_id}                     │
+│  POST /api/v1/pipeline/run  →  background_task              │
+│  GET  /api/v1/pipeline/status/{run_id}                      │
 └────────────────────────┬────────────────────────────────────┘
-                         │ invokes
+                         │ kicks off
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
 │             LangGraph DAG (pipeline/edges/routing.py)       │
 │                                                             │
-│  [1] ingestion ──► [2] classifier                          │
+│  [1] ingestion ──► [2] classifier                           │
 │                          │                                  │
-│               (conditional: any SH-7s found?)               │
+│                 (Gate: Did I find any SH-7s?)               │
 │                          │                                  │
-│                    [3] relationship_resolver                 │
+│                    [3] relationship_resolver                │
 │                          │                                  │
-│                    [4] attachment_extractor                  │
+│                    [4] attachment_extractor                 │
 │                          │                                  │
-│                    [5] sh7_extractor                         │
+│                    [5] sh7_extractor                        │
 │                          │                                  │
-│            (conditional: any extractions succeeded?)         │
+│             (Gate: Did anything actually extract?)          │
 │                          │                                  │
-│                    [6] validator                             │
+│                    [6] validator                            │
 │                          │                                  │
-│           (conditional: any SH-7s passed validation?)        │
+│            (Gate: Did any SH-7s survive validation?)        │
 │                          │                                  │
-│                    [7] assembler                             │
+│                    [7] assembler                            │
 │                          │                                  │
-│                    [8] narrative_generator ──► END          │
+│                    [8] narrative_generator ──► DONE         │
 └─────────────────────────────────────────────────────────────┘
+
 ```
 
 ---
 
 ## Layer-by-Layer Breakdown
 
-### 1. API Layer (`api/`)
+### 1. The API Layer (`api/`)
 
-| File | Role |
-|---|---|
-| `main.py` | FastAPI app factory, mounts the router |
-| `store.py` | In-memory `dict` keyed by `run_id` — acts as a job store |
-| `routes/pipeline.py` | Two endpoints: `POST /run` (fire-and-forget via `BackgroundTasks`) and `GET /status/{run_id}` |
+* **`main.py`**: The standard FastAPI app factory where I mount the router.
+* **`store.py`**: Just a simple in-memory dictionary keyed by `run_id`. It acts as a lightweight job store.
+* **`routes/pipeline.py`**: Houses my two main endpoints. `POST /run` triggers the job, and `GET /status/{run_id}` lets you check on it.
 
-**Why `BackgroundTasks`?** The pipeline can take 30–120 seconds per run (LLM calls). A background task returns immediately so the client polls `/status`.
+**Why use `BackgroundTasks`?**
+The LLM calls mean a full pipeline run can easily take 30 to 120 seconds. I return an immediate response so the frontend isn't hanging, and the client can just poll the status endpoint.
 
-**Why in-memory store?** This is a local intelligence tool, not a multi-instance service. Persistence is through the output files written to `data/outputs/`.
+**Why an in-memory store?**
+This is meant to be a localized intelligence tool, not a massive distributed web service. I handle persistence simply by writing the final output files straight to `data/outputs/`.
 
 ---
 
-### 2. Pipeline Orchestration (`pipeline/edges/routing.py`)
+### 2. Orchestration (`pipeline/edges/routing.py`)
 
-Uses **LangGraph `StateGraph`** — a directed graph where each node is a pure function `(state) → state`.
+I handle the flow using LangGraph's `StateGraph`. It’s essentially a directed graph where every node is just a pure function that takes in the state, modifies it, and passes it along.
 
 **Why LangGraph?**
-- The pipeline is a **DAG with conditional exits** — LangGraph's conditional edges make early termination clean (e.g., if no SH-7 is found, the graph exits immediately without running downstream nodes).
-- State is a single `TypedDict` (`PipelineState`) passed immutably through nodes, making debugging and replay straightforward.
-- Human-in-the-loop was explicitly **removed** in favour of automated flagging — LangGraph's routing edges encode this determinism.
 
-**Three conditional gates:**
-1. **After classifier** — exit if zero SH-7s found
-2. **After sh7_extractor** — exit if zero extractions succeeded
-3. **After validator** — exit if all SH-7s were blocked
+* My pipeline is basically a DAG with specific early-exit points. LangGraph’s conditional edges make it really easy to bail out cleanly. For example, if the classifier doesn't find any SH-7 forms, the graph just stops right there instead of running empty downstream nodes and crashing.
+* State is managed via a single `TypedDict` (`PipelineState`) that gets passed around immutably, which makes debugging and replaying failed runs way less painful.
+* I explicitly ripped out the human-in-the-loop components to force deterministic, automated flagging. LangGraph's routing makes that determinism easy to map out.
 
 ---
 
 ### 3. Shared State (`schemas/pipeline_state.py`)
 
-`PipelineState` is a `TypedDict` with ~17 fields that accumulate results as the graph executes:
+The `PipelineState` object carries about 17 fields that slowly build up as the graph executes. The flow looks like this:
 
-```
-run_id, input_folder
-  → raw_files (ingestion)
-    → classified_docs / sh7_documents / non_sh7_documents (classifier)
-      → document_groups / unmatched_attachment_refs (resolver)
-        → attachment_bundles (attachment_extractor)
-          → extracted_sh7s / sh7_extraction_errors (sh7_extractor)
-            → validation_reports / sh7s_passed_validation (validator)
-              → capital_table_rows (assembler)
-                → final_table_rows / discrepancy_report (narrative_generator)
-```
+`run_id` & `input_folder`
+→ `raw_files`
+→ `classified_docs` (split into SH-7s and non-SH-7s)
+→ `document_groups`
+→ `attachment_bundles`
+→ `extracted_sh7s`
+→ `validation_reports`
+→ `capital_table_rows`
+→ `final_table_rows` & `discrepancy_report`
 
-Each node appends its stage name to `completed_stages` and appends structured errors to `pipeline_errors` (never raises, unless unrecoverable).
+Every time a node finishes, it tacks its name onto `completed_stages` and dumps any structured errors into `pipeline_errors`. I try to never raise actual Python exceptions unless a failure is totally unrecoverable.
 
 ---
 
-### 4. Pipeline Nodes (`pipeline/nodes/`)
+### 4. The Pipeline Nodes (`pipeline/nodes/`)
 
-#### Node 1 — Ingestion (`ingestion.py`)
-- Reads all `.md` files from `input_folder`, builds `FileMetadata` objects.
-- **No LLM.** Errors per-file are logged and skipped — the pipeline never halts on a single bad read.
-- **Why Markdown?** Corpus documents are stored as `.md` for uniform parsing; real-world PDFs would be pre-converted.
+**Step 1: Ingestion (`ingestion.py`)**
+Grabs all the `.md` files from the target folder and spins up `FileMetadata` objects. There's zero LLM usage here. If a file fails to read, I log the error and just skip it—one bad file shouldn't tank the whole run.
 
-#### Node 2 — Classifier (`classifier.py`)
-Two-pass classification:
-- **Pass 1 — Rule-based** (filename keywords → confidence 0.92; content keywords → confidence 0.87). Handles SH7, PAS3, MOA, BoardMeeting, EGM_Notice, EGM_Resolution.
-- **Pass 2 — LLM fallback** (Ollama/Qwen via OpenAI-compatible API) triggered only when rule confidence < 0.85.
-- Documents with confidence < 0.60 go to `unclassified_documents`.
-- **Why hybrid?** LLMs are expensive and slow — rule-based handles the 95% clean case; LLM handles edge cases. This keeps the classifier fast and cost-efficient.
-- Deduplicates SH-7s that share the same `event_date_hint`.
+**Step 2: Classifier (`classifier.py`)**
+I use a two-pass classification system to save time and money.
 
-#### Node 3 — Relationship Resolver (`relationship_resolver.py`)
-- Groups documents into `DocumentGroup` objects: each SH-7 is matched with its Board Resolution, EGM Resolution, and MOA using filename patterns and date hinting.
-- **Why?** SH-7 forms reference attachments by name. The resolver builds the document cluster so the attachment extractor can work on the right set.
+* **Pass 1 (Rule-based):** Checks filename and content keywords. Very fast, and covers well-named filings with high confidence (0.87 to 0.92).
+* **Pass 2 (LLM Fallback):** I fire up Ollama/Qwen via an OpenAI-compatible API only if the rule confidence dips below 0.85.
 
-#### Node 4 — Attachment Extractor (`attachment_extractor.py`)
-- For each `DocumentGroup`, extracts structured data from Board Resolution, EGM Resolution, and MOA using LLM + function-calling.
-- Outputs `AttachmentExtractionBundle` per SH-7.
-- Data is typed via `BoardResolutionExtraction`, `EGMResolutionExtraction`, `MOAExtraction` (Pydantic models in `schemas/attachment.py`).
+Anything scoring under 0.60 gets dumped into `unclassified_documents`. I also run a quick deduplication pass on SH-7s here if they share an `event_date_hint`.
 
-#### Node 5 — SH-7 Extractor (`sh7_extractor.py`)
-- The most critical extraction node. Extracts the full `SH7Extraction` from each SH-7 document via LLM function-calling.
-- Key fields: CIN, meeting_date, existing/revised capital, Section 9(a) post-change breakdown, SRN, stamp duty, attachment filenames.
-- A **Pydantic `model_validator`** cross-checks Section 9(a) total vs Field 4(a)(i) revised capital at parse time — catches extraction inconsistencies immediately.
+**Step 3: Relationship Resolver (`relationship_resolver.py`)**
+This node bundles the documents into `DocumentGroup` objects. It links every SH-7 to its matching Board Resolution, EGM Resolution, and MOA using filename patterns and date clues. I need this because SH-7s reference their attachments by name, so the next node needs to know exactly which files belong to which form.
 
-#### Node 6 — Validator (`validator.py`)
-The most complex node. Runs **4 deterministic checks** in order:
+**Step 4: Attachment Extractor (`attachment_extractor.py`)**
+Takes each document group and extracts the exact structured data I need from the resolutions and MOA using LLM function calling. The output is an `AttachmentExtractionBundle` for each SH-7, strictly typed via Pydantic.
 
-| Check | Type | Logic |
-|---|---|---|
-| **Arithmetic** | Non-blocking | `existing + difference_addition == revised` |
-| **Continuity** | **Blocking** | Event N's `existing` must equal Event N-1's `revised` |
-| **Cross-document** | Non/Blocking | SH-7 date & capital must agree with Board/EGM resolutions. Disagrees with ONE → non-blocking flag. Disagrees with ALL → blocking. |
-| **Duplicate** | **Blocking** | Two SH-7s with same `meeting_date` → both blocked |
+**Step 5: SH-7 Extractor (`sh7_extractor.py`)**
+The heavy hitter of the pipeline. It pulls the full `SH7Extraction` from each form—grabbing the CIN, meeting date, old/new capital, Section 9(a) breakdown, SRN, and stamp duty. I wired up a Pydantic `model_validator` to cross-check the Section 9(a) math against Field 4(a)(i) in real-time. This catches parsing hallucinations instantly.
 
-Flags are issued sequentially: `FLAG_001`, `FLAG_002` ... shared across all events and check types.
+**Step 6: Validator (`validator.py`)**
+This is where the complex logic lives. It runs four hard-coded checks:
 
-#### Node 7 — Assembler (`assembler.py`)
-- Builds `CapitalTableRow` objects from validated SH-7s (blocked ones are excluded).
-- Row 0 is synthetic: "On Incorporation" — derived from Event 1's existing capital.
-- Each field is a `FieldValue(value, confirmed, source_document, source_field_machine, source_field_human, flag_code, flag_message)` — providing full traceability.
-- Meeting type is resolved from EGM resolution body text, then from attached filenames; flagged if neither is available.
+1. **Arithmetic:** Just making sure existing + added actually equals revised. It won't block the run, just flags it.
+2. **Continuity:** Strict block. If Event 2's starting capital doesn't match Event 1's final capital, I halt that branch.
+3. **Cross-doc:** Checks if the SH-7 dates and numbers match the attached resolutions. One mismatch is a warning; all of them mismatching is a hard block.
+4. **Duplicate:** If I see two SH-7s for the exact same meeting date, I block both to be safe.
 
-#### Node 8 — Narrative Generator (`narrative_generator.py`)
-- Formats dates for HTML display.
-- Assembles the `DiscrepancyReport` from all validation reports.
-- **Writes three output files** to `data/outputs/`:
-  - `capital_table.json` — machine-readable capital history
-  - `discrepancy_report.json` — all flags, arithmetic/continuity/cross-doc failures
-  - `capital_table.html` — rendered from `templates/capital_table.html` Jinja2 template
+**Step 7: Assembler (`assembler.py`)**
+Constructs `CapitalTableRow` objects out of whatever SH-7s survived validation. Row 0 is just a fake "On Incorporation" row derived from the first event's starting capital. Every piece of data is stored as a `FieldValue` holding the value, the source document, and exactly where it came from, making the final table 100% traceable.
+
+**Step 8: Narrative Generator (`narrative_generator.py`)**
+Pretties up the dates for the frontend, compiles the final `DiscrepancyReport`, and writes three files to `data/outputs/`: the JSON capital table, the JSON discrepancy report, and a Jinja2-rendered HTML table.
 
 ---
 
 ### 5. Schemas (`schemas/`)
 
-All schemas use **Pydantic V2** for strict validation:
+I went all-in on **Pydantic V2** for this. Type safety is non-negotiable for financial data.
 
-| Schema | Purpose |
-|---|---|
-| `document.py` | `FileMetadata`, `ClassifiedDocument`, `DocumentGroup`, `DocumentType` enum |
-| `sh7.py` | `SH7Extraction`, `ShareBreakdown`, `AuthorisedCapitalBlock` — plus cross-field validator |
-| `attachment.py` | `BoardResolutionExtraction`, `EGMResolutionExtraction`, `MOAExtraction` |
-| `validation.py` | `ArithmeticCheckResult`, `ContinuityCheckResult`, `CrossDocumentCheckResult`, `ValidationReport` |
-| `capital_event.py` | `CapitalTableRow`, `FieldValue` — the output data model |
-| `output.py` | `DiscrepancyReport`, `FlagEntry` — the final report model |
-| `pipeline_state.py` | `PipelineState` TypedDict — the graph's shared state |
+* `document.py`: Handles metadata and groupings.
+* `sh7.py` / `attachment.py`: The extraction targets.
+* `validation.py`: Holds the check results.
+* `capital_event.py` / `output.py`: The final data models.
 
-**Why Pydantic for everything?** Type safety at every stage, automatic serialisation to JSON for outputs, and built-in validation errors that carry field-level context.
+Using Pydantic gives me free JSON serialization, and the built-in validation errors actually tell you exactly which field blew up.
 
 ---
 
 ### 6. Services (`services/`)
 
-| Service | Role |
-|---|---|
-| `llm_client.py` | Wraps Ollama (via OpenAI SDK at `localhost:11434/v1`). Converts Google GenAI `Tool` definitions to OpenAI tool format. Forces function-calling for structured JSON output. Model: `qwen3-coder-next:cloud` (env-configurable). |
-| `document_parser.py` | `read_md_file()` — reads and returns markdown text. `format_inr()` — formats numbers as Indian currency strings. |
-| `template_engine.py` | `render_capital_table()` — Jinja2 rendering of `capital_table.html` template. |
+* **`llm_client.py`**: Wraps Ollama. It grabs Google GenAI tool definitions and mangles them into OpenAI's format to force structured JSON output out of the local model (`qwen3-coder-next:cloud`).
+* **`document_parser.py`**: Handles markdown reading and Indian currency formatting.
+* **`template_engine.py`**: Runs the Jinja renders.
 
-**Why Ollama instead of Gemini API?** Local inference = no network latency, no API costs, fully deterministic for offline/compliance environments. The classifier has a Gemini model reference as an env variable, which allows switiching to closed source models provided by Google anytime.
+**Why Ollama instead of a cloud API?** Local inference means zero network lag, zero API bills, and it works perfectly for offline compliance environments. If I ever need to swap to Gemini or OpenAI, the classifier has an environment variable ready to go.
 
 ---
 
-### 7. Logging (`authorised_capital_changes/logging_config.py`)
+### 7. Centralized Logging (`logging_config.py`)
 
-All pipeline logs are captured simultaneously to the terminal **and** a rotating log file via a single shared `configure_logging()` function.
+Everything goes to the terminal and a rotating log file simultaneously through a single `configure_logging()` setup.
 
-**Entry points:**
+I initialize this at the module level in the CLI script, and inside the FastAPI lifespan context manager for the API. It attaches a `StreamHandler` (for stdout) and a `TimedRotatingFileHandler` to the root logger. Because every node just calls `logging.getLogger(__name__)`, the child loggers propagate up automatically. I didn't have to touch the logging code inside the individual nodes at all.
 
-| Entry point | How logging is initialised |
-|---|---|
-| `run_pipeline.py` | `configure_logging()` called at module level before `main()` |
-| `api/main.py` | `configure_logging()` called inside the FastAPI `lifespan` async context manager (runs once at uvicorn startup) |
+**What the logs look like:**
 
-**Handler stack (both attached to the root logger):**
+```text
+2026-05-24 07:36:43 | INFO  | root | Logging initialised | file=...pipeline_2026-05-24.log
+2026-05-24 07:36:43 | INFO  | ...nodes.ingestion | Ingestion complete | files_read=20 errors=0
+2026-05-24 07:36:43 | INFO  | ...nodes.relationship_resolver | DocumentGroup built | sh7=SH7_Event1.md event_index=1
 
-| Handler | Destination | Format |
-|---|---|---|
-| `StreamHandler` | Terminal (stdout) | `YYYY-MM-DD HH:MM:SS \| LEVEL \| logger.name \| message` |
-| `TimedRotatingFileHandler` | `data/logs/pipeline_<YYYY-MM-DD>.log` | Same format |
-
-**Rotation policy:** Rotates at midnight (`when="midnight"`), retains **30 daily files**, UTF-8 encoded.
-
-**Why root logger?** Every node already uses `logging.getLogger(__name__)` — child loggers propagate to the root automatically, so zero changes were needed inside any node or service.
-
-**Sample log output (from a real run):**
-```
-2026-05-24 07:36:43 | INFO     | root | Logging initialised | file=...pipeline_2026-05-24.log | level=INFO
-2026-05-24 07:36:43 | INFO     | ...nodes.ingestion | Ingestion complete | files_read=20 errors=0
-2026-05-24 07:36:43 | INFO     | ...nodes.classifier | Classifier complete | classified=20 sh7=4 non_sh7=16 unclassified=0
-2026-05-24 07:36:43 | INFO     | ...nodes.relationship_resolver | DocumentGroup built | sh7=SH7_Event1_2018.md event_index=1 board=BoardMeeting_Event1_2018.md egm=EGM_Event1_2018.md moa=MOA_Event1_2018.md unmatched=0
-```
-
-**Log file location:**
-```
-Project/
-└── data/
-    └── logs/
-        ├── pipeline_2026-05-24.log   ← current day
-        ├── pipeline_2026-05-23.log   ← yesterday (auto-rotated)
-        └── ...                       ← up to 30 days retained
 ```
 
 ---
 
-### 8. Data (`data/raw/`)
+### 8. The Raw Data (`data/raw/`)
 
-20 Markdown files representing 4 corporate capital events (2018, 2019, 2021, 2024):
-
-```
-SH7_Event{N}_{YEAR}.md         — Form SH-7
-BoardMeeting_Event{N}_{YEAR}.md — Board resolution
-EGM_Event{N}_{YEAR}.md         — EGM resolution
-Notice_of_EGM_{YEAR}.md        — EGM notice (classified but not extracted)
-MOA_Event{N}_{YEAR}.md         — Memorandum of Association Clause V
-```
+The system expects Markdown files representing corporate capital events. I use a standard naming convention like `SH7_Event{N}_{YEAR}.md`, `BoardMeeting_Event{N}_{YEAR}.md`, and `MOA_Event{N}_{YEAR}.md`.
 
 ---
 
-## Key Design Decisions
+## Why I Designed It This Way
 
-| Decision | Rationale |
-|---|---|
-| **Linear DAG, no parallelism** | Deterministic, reproducible, easy to debug. Each stage's output is the next stage's input. |
-| **Rule-based classifier first** | Keeps LLM calls to a minimum; rule-based covers well-named MCA filings reliably. |
-| **Blocking vs non-blocking flags** | Arithmetic mismatch → non-blocking (data is still used with flag). Continuity break → blocking (downstream output would be wrong). Cross-doc: majority disagrees → blocking, minority disagrees → non-blocking. |
-| **`FieldValue` traceability** | Every output value carries `source_document`, `source_field_machine`, `source_field_human` — so any number in the final table can be traced back to the exact field in the exact file. |
-| **`completed_stages` list** | Enables the API status endpoint to report granular progress without database dependency. |
-| **No human-in-the-loop** | Explicitly removed. Unresolvable ambiguities are flagged in the report, not paused for review — the system is fully automated. |
-| **Centralised logging to file** | `configure_logging()` attaches a `TimedRotatingFileHandler` to the root logger at startup. All node-level `getLogger(__name__)` calls propagate automatically — no per-node changes needed. 30-day retention, daily rotation. |
+* **Linear DAG, zero parallelism:** I wanted it highly deterministic and easy to debug. Each stage's output is just the next stage's input.
+* **Rule-based classifier first:** Keeps expensive LLM calls to an absolute minimum.
+* **`FieldValue` traceability:** Any number you see on the final frontend table can be traced back to the exact field in the exact raw file.
+* **No human intervention:** Unresolvable ambiguities are explicitly flagged in the final report, not paused for manual review. It runs completely hands-off.
